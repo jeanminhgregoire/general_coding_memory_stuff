@@ -1,0 +1,1231 @@
+
+# =============================================================================
+# POLARS — COMPLETE PYTHON CHEATSHEET
+# =============================================================================
+#
+# Polars is a high-performance DataFrame library for Python.
+#
+# This cheatsheet covers:
+# - Core concepts and DataFrame creation
+# - Data inspection and file I/O
+# - Expressions, selection, filtering and sorting
+# - Transformations, casting and aggregations
+# - Grouping, joins and concatenation
+# - String, null and date operations
+# - Ranking, windows and nested data
+# - Reshaping and lazy execution
+# - SQL, interoperability and performance
+#
+# Official documentation: https://docs.pola.rs/
+# Python API: https://docs.pola.rs/api/python/stable/reference/
+#
+# =============================================================================
+# IMPORTS
+# =============================================================================
+
+import polars as pl
+from datetime import date, datetime, timedelta
+import polars.selectors as cs
+
+
+# =============================================================================
+# 1. INSTALLATION
+# =============================================================================
+#
+# Run these commands in your terminal:
+#
+# pip install polars
+# pip install "polars[numpy,pandas,pyarrow]"
+#
+# Optional integrations include NumPy, Pandas and PyArrow.
+
+
+# =============================================================================
+# 2. CORE CONCEPTS
+# =============================================================================
+#
+# DataFrame: Two-dimensional table.
+# Series: One typed column.
+# Expression (pl.Expr): Composable description of a computation.
+# LazyFrame: Query plan optimized before execution.
+
+df = pl.DataFrame({"x": [1, 2, 3]})
+s = pl.Series("x", [1, 2, 3])
+
+# Eager execution
+df.filter(pl.col("x") > 1)
+
+# Lazy execution
+df.lazy().filter(pl.col("x") > 1).collect()
+
+
+# =============================================================================
+# 3. CREATE DATAFRAMES
+# =============================================================================
+
+df = pl.DataFrame({
+    "name": ["Alice", "Bob", "Carol", "Dan"],
+    "age": [25, 30, 35, 28],
+    "salary": [50000, 65000, 80000, 58000],
+    "city": ["Geneva", "Zurich", "Geneva", "Basel"],
+})
+
+# Create from rows
+df_rows = pl.DataFrame(
+    [("Alice", 25), ("Bob", 30)],
+    schema=["name", "age"],
+    orient="row",
+)
+
+# Explicit schema
+df_typed = pl.DataFrame(
+    {"id": [1, 2], "value": [10.5, 20.5]},
+    schema={"id": pl.Int64, "value": pl.Float64},
+)
+
+# Empty DataFrame
+empty = pl.DataFrame(
+    schema={"id": pl.Int64, "name": pl.String}
+)
+
+# Create from dictionaries
+df_dicts = pl.DataFrame([
+    {"id": 1, "name": "A"},
+    {"id": 2, "name": "B"},
+])
+
+
+# =============================================================================
+# 4. INSPECT DATA
+# =============================================================================
+
+df.head()
+df.head(10)
+df.tail()
+df.sample(n=3, seed=42)
+
+# Dimensions and structure
+df.shape
+df.height
+df.width
+df.columns
+df.schema
+df.dtypes
+
+# Statistics and information
+df.describe()
+df.glimpse()
+df.null_count()
+df.is_empty()
+df.estimated_size()
+
+# Access data
+df.select("name", "age")
+df["age"]                 # Series
+df.get_column("age")
+df.row(0)                 # Tuple
+df.rows()
+df.to_dicts()
+
+# For large datasets, avoid converting all rows to Python
+# objects unless necessary.
+
+
+# =============================================================================
+# 5. READ AND WRITE FILES
+# =============================================================================
+
+# CSV
+df = pl.read_csv("data.csv")
+df.write_csv("output.csv")
+
+# Parquet
+df = pl.read_parquet("data.parquet")
+df.write_parquet("output.parquet")
+
+# JSON
+df = pl.read_json("data.json")
+df.write_json("output.json")
+
+# NDJSON
+df = pl.read_ndjson("data.ndjson")
+df.write_ndjson("output.ndjson")
+
+# IPC / Feather
+df = pl.read_ipc("data.arrow")
+df.write_ipc("output.arrow")
+
+# CSV options
+df = pl.read_csv(
+    "data.csv",
+    separator=",",
+    has_header=True,
+    columns=["id", "price"],
+    n_rows=1000,
+    null_values=["", "NA", "null"],
+    try_parse_dates=True,
+    infer_schema_length=10000,
+    ignore_errors=False,
+    encoding="utf8",
+)
+
+df.write_csv("output.csv", include_header=True)
+
+# Lazy scans
+lf = pl.scan_csv("data.csv")
+lf = pl.scan_parquet("data.parquet")
+lf = pl.scan_ndjson("data.ndjson")
+
+# Lazy Parquet query
+result = (
+    pl.scan_parquet("sales/*.parquet")
+    .filter(pl.col("revenue") > 1000)
+    .select("customer", "revenue")
+    .collect()
+)
+
+
+# =============================================================================
+# 6. THE FOUR ESSENTIAL EXPRESSION CONTEXTS
+# =============================================================================
+#
+# .select()          Select or calculate output columns.
+# .with_columns()    Add or replace columns.
+# .filter()          Keep matching rows.
+# .group_by().agg()  Aggregate by group.
+
+df.select("name", "salary")
+
+df.select(
+    pl.col("salary").mean().alias("avg_salary"),
+    pl.col("age").max().alias("max_age"),
+)
+
+df.with_columns(
+    (pl.col("salary") * 1.10).alias("new_salary"),
+    pl.col("name").str.to_uppercase().alias("name_upper"),
+)
+
+df.filter(pl.col("age") >= 30)
+
+df.group_by("city").agg(
+    pl.col("salary").mean().alias("avg_salary"),
+    pl.len().alias("employee_count"),
+)
+
+# Expression building blocks
+pl.col("salary")
+pl.col("salary").alias("pay")
+pl.lit(100)
+pl.all()
+pl.exclude("id")
+pl.col("^sales_.*$")
+pl.col(["age", "salary"])
+pl.col(pl.Int64)
+
+# Selectors
+df.select(cs.numeric())
+df.select(cs.string())
+df.select(cs.temporal())
+
+# Expressions describe calculations; they are not ordinary
+# Python scalar values.
+
+
+# =============================================================================
+# 7. SELECT, RENAME, REORDER AND DROP
+# =============================================================================
+
+df.select("name", "age")
+df.select(pl.all())
+
+df.rename({"name": "employee", "salary": "pay"})
+
+df.drop("age")
+df.drop(["age", "city"])
+
+df.select("name", "salary", "age", "city")
+
+df.select(pl.all().name.prefix("raw_"))
+df.select(pl.all().name.suffix("_clean"))
+
+df.select(pl.col("^sales_.*$"))
+
+df.rename(lambda name: name.lower())
+
+df.select(cs.numeric())
+
+# .select() keeps only selected columns.
+# .with_columns() retains all other columns.
+
+
+# =============================================================================
+# 8. FILTER ROWS
+# =============================================================================
+
+df.filter(pl.col("age") > 30)
+df.filter(pl.col("age") >= 30)
+df.filter(pl.col("city") == "Geneva")
+df.filter(pl.col("city") != "Basel")
+
+# AND / OR / NOT
+# Use &, | and ~ instead of Python's and, or and not.
+
+df.filter(
+    (pl.col("age") >= 25)
+    & (pl.col("salary") > 55000)
+)
+
+df.filter(
+    (pl.col("city") == "Geneva")
+    | (pl.col("city") == "Zurich")
+)
+
+df.filter(~(pl.col("city") == "Basel"))
+
+df.filter(pl.col("city").is_in(["Geneva", "Zurich"]))
+
+df.filter(
+    pl.col("age").is_between(25, 35, closed="both")
+)
+
+# String filters
+df.filter(pl.col("name").str.contains("Ali"))
+df.filter(pl.col("name").str.starts_with("A"))
+df.filter(pl.col("name").str.ends_with("e"))
+
+# Null filters
+df.filter(pl.col("salary").is_not_null())
+df.filter(pl.col("salary").is_null())
+
+# Always parenthesize individual comparisons when combining
+# Polars expressions with &, | and ~.
+
+
+# =============================================================================
+# 9. SORT, LIMIT, UNIQUE AND SAMPLE
+# =============================================================================
+
+df.sort("salary")
+df.sort("salary", descending=True)
+
+df.sort(
+    ["city", "salary"],
+    descending=[False, True],
+)
+
+df.sort("salary", nulls_last=True)
+
+df.head(5)
+df.tail(5)
+df.limit(10)
+
+# Unique rows
+df.unique()
+
+df.unique(
+    subset=["city"],
+    keep="first",
+    maintain_order=True,
+)
+
+df["city"].unique()
+df.select(pl.col("city").n_unique())
+
+# Sampling
+df.sample(n=3, seed=42)
+df.sample(fraction=0.5, seed=42)
+df.sample(fraction=1.0, shuffle=True, seed=42)
+
+# Row index
+df.with_row_index("row_id")
+
+# Use a seed for reproducible sampling.
+# Use maintain_order=True when retained order matters.
+
+
+# =============================================================================
+# 10. CREATE, TRANSFORM AND CAST COLUMNS
+# =============================================================================
+
+df.with_columns(
+    (pl.col("salary") + 1000).alias("salary_plus_1000"),
+    (pl.col("salary") * 1.10).alias("salary_increased"),
+    (pl.col("salary") / 12).alias("monthly_salary"),
+)
+
+# Conditional expressions
+df.with_columns(
+    pl.when(pl.col("salary") >= 70000)
+    .then(pl.lit("High"))
+    .otherwise(pl.lit("Standard"))
+    .alias("salary_band")
+)
+
+# Multiple conditions
+df.with_columns(
+    pl.when(pl.col("salary") >= 75000).then(pl.lit("A"))
+    .when(pl.col("salary") >= 60000).then(pl.lit("B"))
+    .otherwise(pl.lit("C"))
+    .alias("grade")
+)
+
+# Casting
+pl.col("age").cast(pl.Float64)
+pl.col("age").cast(pl.String)
+pl.col("age").cast(pl.Int64, strict=False)
+
+# strict=False converts invalid values to null.
+
+# Common data types:
+#
+# Integers:
+# pl.Int8, pl.Int16, pl.Int32, pl.Int64
+#
+# Unsigned integers:
+# pl.UInt8, pl.UInt16, pl.UInt32, pl.UInt64
+#
+# Floating point:
+# pl.Float32, pl.Float64
+#
+# Other:
+# pl.Boolean, pl.String, pl.Decimal
+#
+# Temporal:
+# pl.Date, pl.Datetime, pl.Duration, pl.Time
+#
+# Nested:
+# pl.List(...), pl.Array(...), pl.Struct(...)
+#
+# Categories:
+# pl.Categorical, pl.Enum([...])
+
+# Example casts
+df = df.with_columns(
+    pl.col("age").cast(pl.Float64)
+)
+
+
+# =============================================================================
+# 11. AGGREGATION FUNCTIONS
+# =============================================================================
+
+df.select(
+    pl.col("salary").sum().alias("sum"),
+    pl.col("salary").mean().alias("mean"),
+    pl.col("salary").median().alias("median"),
+    pl.col("salary").min().alias("min"),
+    pl.col("salary").max().alias("max"),
+    pl.col("salary").std().alias("std"),
+    pl.col("salary").var().alias("variance"),
+)
+
+df.select(
+    pl.len().alias("rows"),
+    pl.col("city").count().alias("non_null_city"),
+    pl.col("city").n_unique().alias("unique_cities"),
+)
+
+df.select(
+    pl.col("salary").quantile(0.25).alias("q25"),
+    pl.col("salary").quantile(0.50).alias("q50"),
+    pl.col("salary").quantile(0.90).alias("q90"),
+)
+
+df.select(
+    pl.col("salary").first(),
+    pl.col("salary").last(),
+    pl.col("salary").arg_max(),
+    pl.col("salary").arg_min(),
+)
+
+df.select(
+    (pl.col("age") > 30).any(),
+    (pl.col("age") > 18).all(),
+)
+
+# .count() counts non-null values in the selected column.
+# pl.len() counts rows.
+# .n_unique() counts distinct values.
+
+
+# =============================================================================
+# 12. GROUP BY AND AGGREGATE
+# =============================================================================
+
+df.group_by("city").agg(
+    pl.col("salary").mean().alias("avg_salary")
+)
+
+df.group_by(["city", "age"]).agg(
+    pl.col("salary").mean().alias("avg_salary"),
+    pl.len().alias("rows"),
+)
+
+df.group_by("city").agg(
+    pl.col("salary").sum().alias("total"),
+    pl.col("salary").mean().alias("average"),
+    pl.col("salary").median().alias("median"),
+    pl.col("salary").min().alias("minimum"),
+    pl.col("salary").max().alias("maximum"),
+    pl.col("name").n_unique().alias("unique_names"),
+)
+
+# Aggregate numeric columns
+df.group_by("city").agg(cs.numeric().mean())
+
+# Collect values into lists
+df.group_by("city").agg(
+    pl.col("name").alias("employees")
+)
+
+# Aggregate and sort
+(
+    df.group_by("city")
+    .agg(pl.col("salary").mean().alias("avg_salary"))
+    .sort("avg_salary", descending=True)
+)
+
+# Filter aggregated results
+df.group_by("city").agg(
+    pl.col("salary").mean().alias("avg_salary")
+).filter(pl.col("avg_salary") > 60000)
+
+# Window functions preserve row-level data.
+df.with_columns(
+    pl.col("salary").mean().over("city").alias("city_avg"),
+    pl.col("salary").max().over("city").alias("city_max"),
+    (
+        pl.col("salary")
+        - pl.col("salary").mean().over("city")
+    ).alias("difference_from_city_avg"),
+)
+
+# Unlike group_by().agg(), .over() generally retains the
+# original row structure.
+
+
+# =============================================================================
+# 13. JOINS AND CONCATENATION
+# =============================================================================
+
+left.join(right, on="id", how="inner")
+left.join(right, on="id", how="left")
+left.join(right, on="id", how="full")
+left.join(right, on="id", how="semi")
+left.join(right, on="id", how="anti")
+
+# Different key names
+left.join(
+    right,
+    left_on="customer_id",
+    right_on="id",
+    how="left",
+    suffix="_right",
+)
+
+# Multiple keys
+left.join(right, on=["id", "date"], how="left")
+
+# Null matching
+left.join(right, on="id", nulls_equal=True)
+
+# Validate key relationships
+left.join(right, on="id", validate="1:1")
+
+# As-of joins
+trades.join_asof(
+    quotes,
+    on="timestamp",
+    by="symbol",
+    strategy="backward",
+)
+
+# Concatenation
+pl.concat([df1, df2], how="vertical")
+pl.concat([df1, df2], how="vertical_relaxed")
+pl.concat([df1, df2], how="horizontal")
+
+# Join keys and schemas must be compatible.
+# Horizontal concatenation aligns by position, not by a key.
+# For as-of joins, sort the relevant keys appropriately.
+
+
+# =============================================================================
+# 14. STRING OPERATIONS
+# =============================================================================
+
+pl.col("name").str.to_lowercase()
+pl.col("name").str.to_uppercase()
+pl.col("name").str.to_titlecase()
+
+# Remove whitespace
+pl.col("name").str.strip_chars()
+pl.col("name").str.strip_chars_start()
+pl.col("name").str.strip_chars_end()
+
+# Replace text
+pl.col("name").str.replace("old", "new")
+pl.col("name").str.replace_all("old", "new")
+
+# Regular expressions
+pl.col("name").str.contains(r"^[A-Z]")
+pl.col("name").str.extract(r"(\d+)", group_index=1)
+pl.col("name").str.replace_all(r"\s+", " ")
+
+# String matching
+pl.col("name").str.starts_with("A")
+pl.col("name").str.ends_with("e")
+
+# String length and slicing
+pl.col("name").str.len_chars()
+pl.col("name").str.slice(0, 3)
+pl.col("name").str.split(" ")
+
+# Concatenate strings
+pl.concat_str(
+    [pl.col("first_name"), pl.col("last_name")],
+    separator=" ",
+).alias("full_name")
+
+# Example cleaning pipeline
+cleaned = df.with_columns(
+    pl.col("name")
+    .str.strip_chars()
+    .str.to_lowercase()
+    .str.replace_all(r"\s+", " ")
+    .alias("name_clean")
+)
+
+# Prefer native string expressions to Python functions
+# applied row by row.
+
+
+# =============================================================================
+# 15. NULLS, MISSING VALUES AND NaN
+# =============================================================================
+
+df.null_count()
+
+df.select(pl.all().is_null())
+
+df.filter(pl.col("salary").is_not_null())
+df.filter(pl.col("salary").is_null())
+
+# Drop nulls
+df.drop_nulls()
+df.drop_nulls(subset=["salary"])
+
+# Fill nulls
+df.with_columns(pl.col("salary").fill_null(0))
+
+df.with_columns(
+    pl.col("salary").fill_null(pl.col("salary").mean())
+)
+
+df.with_columns(
+    pl.col("salary").fill_null(strategy="forward")
+)
+
+df.with_columns(
+    pl.col("salary").fill_null(strategy="backward")
+)
+
+df.with_columns(
+    pl.col("salary").fill_null(pl.col("fallback_salary"))
+)
+
+# NaN operations
+df.with_columns(pl.col("score").fill_nan(None))
+df.filter(pl.col("score").is_nan())
+
+# Replace values
+df.with_columns(
+    pl.col("city").replace({
+        "Geneva": "GE",
+        "Zurich": "ZH",
+    })
+)
+
+# Important:
+# Use .is_null() and .fill_null() for nulls.
+# Use .is_nan() and .fill_nan() for floating-point NaNs.
+# Comparisons involving null may produce null rather than
+# true or false.
+
+
+# =============================================================================
+# 16. DATE AND DATETIME OPERATIONS
+# =============================================================================
+
+# Parse dates
+df.with_columns(
+    pl.col("date_string").str.to_date("%Y-%m-%d")
+)
+
+df.with_columns(
+    pl.col("timestamp_string")
+    .str.to_datetime("%Y-%m-%d %H:%M:%S")
+)
+
+# Extract date components
+df.with_columns(
+    pl.col("timestamp").dt.year().alias("year"),
+    pl.col("timestamp").dt.month().alias("month"),
+    pl.col("timestamp").dt.day().alias("day"),
+    pl.col("timestamp").dt.weekday().alias("weekday"),
+    pl.col("timestamp").dt.hour().alias("hour"),
+)
+
+# Truncate datetime
+df.with_columns(
+    pl.col("timestamp").dt.truncate("1d").alias("day")
+)
+
+# Monthly aggregation
+df.group_by(
+    pl.col("date").dt.truncate("1mo").alias("month")
+).agg(
+    pl.col("sales").sum()
+)
+
+# Format dates
+df.with_columns(
+    pl.col("date").dt.strftime("%Y-%m").alias("year_month")
+)
+
+# Date arithmetic
+df.with_columns(
+    (pl.col("date") + pl.duration(days=7)).alias("next_week")
+)
+
+df.with_columns(
+    (pl.col("end_date") - pl.col("start_date")).alias("duration")
+)
+
+# Date filtering
+df.filter(
+    pl.col("date").is_between(
+        date(2026, 1, 1),
+        date(2026, 12, 31),
+    )
+)
+
+# Time zones
+df.with_columns(
+    pl.col("timestamp").dt.replace_time_zone("UTC")
+)
+
+df.with_columns(
+    pl.col("timestamp").dt.convert_time_zone("Europe/Zurich")
+)
+
+# replace_time_zone() changes timezone interpretation.
+# convert_time_zone() converts an already timezone-aware
+# datetime while preserving the instant.
+
+
+# =============================================================================
+# 17. RANKING, CUMULATIVE OPERATIONS AND WINDOWS
+# =============================================================================
+
+# Ranking
+df.with_columns(
+    pl.col("salary").rank().alias("rank")
+)
+
+df.with_columns(
+    pl.col("salary").rank(descending=True).alias("rank_desc")
+)
+
+df.with_columns(
+    pl.col("salary").rank(method="dense").alias("dense_rank")
+)
+
+# Cumulative operations
+df.with_columns(
+    pl.col("salary").cum_sum().alias("cumulative_salary"),
+    pl.col("salary").cum_max().alias("running_max"),
+    pl.col("salary").cum_min().alias("running_min"),
+)
+
+# Previous and next rows
+df.with_columns(
+    pl.col("salary").shift(1).alias("previous_salary"),
+    pl.col("salary").shift(-1).alias("next_salary"),
+    pl.col("salary").diff().alias("salary_change"),
+)
+
+# Percentage change
+df.with_columns(
+    (
+        pl.col("salary") / pl.col("salary").shift(1) - 1
+    ).alias("pct_change")
+)
+
+# Grouped windows
+df.with_columns(
+    pl.col("salary").rank(descending=True).over("city")
+    .alias("rank_in_city"),
+
+    pl.col("salary").sum().over("city")
+    .alias("city_total"),
+)
+
+# Sort before time-series calculations
+df.sort("timestamp").with_columns(
+    pl.col("value").shift(1).alias("previous_value")
+)
+
+# For meaningful time-series calculations, sort by the
+# intended ordering column first.
+
+
+# =============================================================================
+# 18. LISTS, ARRAYS AND STRUCTS
+# =============================================================================
+
+df = pl.DataFrame({
+    "values": [[1, 2, 3], [4, 5], [6]]
+})
+
+df.with_columns(
+    pl.col("values").list.len().alias("length"),
+    pl.col("values").list.first().alias("first"),
+    pl.col("values").list.last().alias("last"),
+    pl.col("values").list.sum().alias("sum"),
+    pl.col("values").list.max().alias("max"),
+    pl.col("values").list.get(
+        0,
+        null_on_oob=True
+    ).alias("first_again"),
+)
+
+# Explode lists into rows
+df.explode("values")
+
+# Struct data
+df_struct = pl.DataFrame({
+    "person": [
+        {"name": "Alice", "age": 25},
+        {"name": "Bob", "age": 30},
+    ]
+})
+
+# Expand struct into columns
+df_struct.unnest("person")
+
+# Access individual struct fields
+df_struct.with_columns(
+    pl.col("person").struct.field("name").alias("name")
+)
+
+
+# =============================================================================
+# 19. RESHAPE: PIVOT, UNPIVOT AND EXPLODE
+# =============================================================================
+
+df = pl.DataFrame({
+    "city": ["Geneva", "Geneva", "Zurich", "Zurich"],
+    "year": [2025, 2026, 2025, 2026],
+    "sales": [100, 120, 90, 110],
+})
+
+# Long to wide
+wide = df.pivot(
+    on="year",
+    index="city",
+    values="sales",
+    aggregate_function="sum",
+)
+
+# Wide to long
+long = wide.unpivot(
+    index="city",
+    on=["2025", "2026"],
+    variable_name="year",
+    value_name="sales",
+)
+
+# Explode list columns
+df.explode("items")
+
+# Add row index
+df.with_row_index("index")
+
+# Transpose
+df.transpose()
+
+# Pivot output columns depend on the data.
+# Check actual wide.columns before unpivoting.
+
+
+# =============================================================================
+# 20. LAZY EXECUTION AND OPTIMIZATION
+# =============================================================================
+
+query = (
+    pl.scan_parquet("sales.parquet")
+    .filter(pl.col("revenue") > 1000)
+    .select("customer", "revenue")
+    .with_columns(
+        (pl.col("revenue") * 1.08).alias("revenue_with_tax")
+    )
+    .sort("revenue_with_tax", descending=True)
+)
+
+# Inspect query plan
+print(query.explain())
+
+# Execute query
+result = query.collect()
+
+# Useful LazyFrame methods
+# lf.collect()
+# lf.collect_schema()
+# lf.explain()
+# lf.profile()
+# lf.head(100).collect()
+# lf.collect(engine="streaming")
+
+# Best practices:
+# - Use scan_csv() / scan_parquet() for large inputs.
+# - Filter early and select only needed columns.
+# - Keep transformations in one lazy query where practical.
+# - Use .explain() when investigating performance.
+# - Collect only when a materialized result is needed.
+# - Streaming support depends on the query and engine.
+
+
+# =============================================================================
+# 21. SQL INTERFACE
+# =============================================================================
+
+df = pl.DataFrame({
+    "name": ["Alice", "Bob", "Carol"],
+    "salary": [50000, 65000, 80000],
+})
+
+result = pl.SQLContext(employees=df).execute("""
+    SELECT name, salary
+    FROM employees
+    WHERE salary > 55000
+    ORDER BY salary DESC
+""").collect()
+
+# SQL to Polars reference:
+#
+# SELECT      -> .select()
+# WHERE       -> .filter()
+# GROUP BY    -> .group_by().agg()
+# ORDER BY    -> .sort()
+# LIMIT       -> .limit()
+# DISTINCT    -> .unique()
+# JOIN        -> .join()
+
+
+# =============================================================================
+# 22. INTEROPERABILITY AND DATABASES
+# =============================================================================
+
+# Optional integrations
+import pandas as pd
+import numpy as np
+
+# Pandas to Polars
+df = pl.from_pandas(
+    pd.DataFrame({"x": [1, 2, 3]})
+)
+
+# Polars to Pandas
+pdf = df.to_pandas()
+
+# NumPy to Polars
+arr = np.array([[1, 2], [3, 4]])
+
+df = pl.DataFrame(
+    arr,
+    schema=["a", "b"],
+    orient="row",
+)
+
+# Polars to NumPy
+arr = df.to_numpy()
+
+# Python objects
+records = df.to_dicts()
+rows = df.rows()
+
+# Read from database
+df = pl.read_database(
+    query="SELECT * FROM employees",
+    connection=connection,
+)
+
+# Write to database
+df.write_database(
+    table_name="employees",
+    connection=connection_uri,
+    if_table_exists="replace",
+)
+
+# Optional dependencies and suitable database drivers
+# may be required.
+# For large tables, consider pushing filters and
+# aggregations into the database.
+
+
+# =============================================================================
+# 23. ADVANCED EXPRESSION PATTERNS
+# =============================================================================
+
+# Reusable expression function
+def normalize(column: str) -> pl.Expr:
+    x = pl.col(column)
+
+    return (
+        (x - x.mean()) / x.std()
+    ).alias(f"{column}_zscore")
+
+
+result = df.with_columns(
+    normalize("salary"),
+    normalize("age"),
+)
+
+# Horizontal operations
+df.with_columns(
+    pl.sum_horizontal(
+        "math", "science", "english"
+    ).alias("total"),
+
+    pl.max_horizontal(
+        "a", "b", "c"
+    ).alias("row_max"),
+
+    pl.min_horizontal(
+        "a", "b", "c"
+    ).alias("row_min"),
+
+    pl.mean_horizontal(
+        "a", "b", "c"
+    ).alias("row_mean"),
+)
+
+# Conditional aggregation
+df.group_by("city").agg(
+    pl.col("salary")
+    .filter(pl.col("age") >= 30)
+    .mean()
+    .alias("avg_salary_age_30_plus")
+)
+
+# Selectors
+df.with_columns(cs.numeric().round(2))
+df.with_columns(cs.string().str.to_lowercase())
+
+df.select(pl.exclude("id", "timestamp"))
+
+# Native expressions are generally preferable to custom
+# Python functions for performance and query optimization.
+
+
+# =============================================================================
+# 24. PERFORMANCE CHECKLIST
+# =============================================================================
+#
+# 1. Prefer native Polars expressions over Python loops.
+# 2. Use lazy scans for large files.
+# 3. Select fewer columns and filter early.
+# 4. Avoid unnecessary .collect() calls.
+# 5. Avoid unnecessary conversions to Pandas or Python objects.
+# 6. Use Parquet for many analytical workloads.
+# 7. Inspect query plans with .explain().
+# 8. Use map_elements() or map_batches() only when native
+#    expressions do not fit.
+# 9. Sort explicitly when row order matters.
+# 10. Handle null and NaN separately.
+# 11. Check API details against your installed Polars version.
+
+
+# =============================================================================
+# 25. END-TO-END ANALYTICS PIPELINE
+# =============================================================================
+
+result = (
+    pl.scan_csv("sales.csv")
+
+    # Clean and convert columns
+    .with_columns(
+        pl.col("customer").str.strip_chars(),
+        pl.col("amount").cast(pl.Float64, strict=False),
+        pl.col("date").str.to_date("%Y-%m-%d"),
+    )
+
+    # Filter invalid data
+    .filter(
+        pl.col("amount").is_not_null()
+        & (pl.col("amount") >= 0)
+    )
+
+    # Transform columns
+    .with_columns(
+        pl.col("date").dt.truncate("1mo").alias("month"),
+        (pl.col("amount") * 1.08).alias("amount_with_tax"),
+    )
+
+    # Aggregate data
+    .group_by(["month", "customer"])
+    .agg(
+        pl.col("amount").sum().alias("total_sales"),
+        pl.col("amount").mean().alias("average_sale"),
+        pl.len().alias("transaction_count"),
+    )
+
+    # Rank customers within each month
+    .with_columns(
+        pl.col("total_sales")
+        .rank(method="dense", descending=True)
+        .over("month")
+        .alias("monthly_rank")
+    )
+
+    # Sort results
+    .sort(["month", "monthly_rank"])
+
+    # Execute lazy query
+    .collect()
+)
+
+# Export result
+result.write_parquet("sales_summary.parquet")
+
+# Display result
+print(result)
+
+# General workflow:
+#
+# SCAN
+#   -> CLEAN
+#   -> FILTER
+#   -> TRANSFORM
+#   -> AGGREGATE
+#   -> ANALYZE
+#   -> COLLECT
+#   -> WRITE
+
+
+# =============================================================================
+# 26. QUICK-REFERENCE INDEX
+# =============================================================================
+#
+# CREATE:
+# pl.DataFrame({...})
+#
+# READ CSV:
+# pl.read_csv("file.csv")
+#
+# LAZY READ:
+# pl.scan_csv("file.csv")
+#
+# SELECT:
+# df.select("a", "b")
+#
+# ADD COLUMNS:
+# df.with_columns(...)
+#
+# FILTER:
+# df.filter(pl.col("x") > 0)
+#
+# RENAME:
+# df.rename({"old": "new"})
+#
+# DROP:
+# df.drop("x")
+#
+# SORT:
+# df.sort("x", descending=True)
+#
+# DEDUPLICATE:
+# df.unique()
+#
+# AGGREGATE:
+# df.group_by("g").agg(...)
+#
+# JOIN:
+# left.join(right, on="id", how="left")
+#
+# CONCATENATE:
+# pl.concat([df1, df2])
+#
+# FILL NULLS:
+# .fill_null(...)
+#
+# CAST:
+# .cast(pl.Int64)
+#
+# STRING METHODS:
+# .str.*
+#
+# DATE METHODS:
+# .dt.*
+#
+# WINDOW:
+# .over("group")
+#
+# PREVIOUS ROW:
+# .shift(1)
+#
+# CUMULATIVE SUM:
+# .cum_sum()
+#
+# ROW-WISE SUM:
+# pl.sum_horizontal(...)
+#
+# EXECUTE LAZY QUERY:
+# .collect()
+#
+# QUERY PLAN:
+# .explain()
+#
+# WRITE PARQUET:
+# .write_parquet("out.parquet")
+#
+# TO PANDAS:
+# .to_pandas()
+
+
+# =============================================================================
+# OFFICIAL DOCUMENTATION
+# =============================================================================
+#
+# Polars User Guide:
+# https://docs.pola.rs/
+#
+# Python API Reference:
+# https://docs.pola.rs/api/python/stable/reference/
+#
+# Expressions:
+# https://docs.pola.rs/user-guide/expressions/
+#
+# Lazy API:
+# https://docs.pola.rs/user-guide/concepts/lazy-api/
+#
+# Input / Output:
+# https://docs.pola.rs/user-guide/io/
+#
+# Joins:
+# https://docs.pola.rs/user-guide/transformations/joins/
+#
+# Recommended learning order:
+#
+# 1. Expressions
+# 2. Filtering and selection
+# 3. Grouping and joins
+# 4. Strings and dates
+# 5. Lazy execution
+# 6. Performance tuning
+#
+# =============================================================================
+# END OF POLARS COMPLETE PYTHON CHEATSHEET
+# =============================================================================
